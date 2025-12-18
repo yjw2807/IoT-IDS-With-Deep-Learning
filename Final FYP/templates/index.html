@@ -1,0 +1,173 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>IDS Dashboard</title>
+    <style>
+        body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; background-color: #f0f2f5; color: #1c1e21; margin: 0; padding: 20px; }
+        .container { max-width: 900px; margin: 0 auto; background-color: #fff; border-radius: 8px; box-shadow: 0 2px 4px rgba(0,0,0,0.1); padding: 20px; }
+        h1, h2 { color: #333; border-bottom: 1px solid #ddd; padding-bottom: 10px; }
+        .controls { display: flex; align-items: center; gap: 15px; margin-bottom: 20px; flex-wrap: wrap; }
+        #interfaceSelector { font-size: 16px; padding: 8px; border-radius: 6px; border: 1px solid #ccc; }
+        .btn { font-size: 16px; padding: 10px 15px; border-radius: 6px; border: none; cursor: pointer; color: #fff; font-weight: bold; }
+        #startButton { background-color: #42b72a; }
+        #stopButton { background-color: #fa3e3e; }
+        #startButton:disabled, #stopButton:disabled { background-color: #999; cursor: not-allowed; }
+        .status { margin-top: 20px; padding: 10px; border-radius: 6px; background-color: #e7f3ff; border: 1px solid #cce0f5; }
+        #log-container, #hotspot-clients-container { margin-top: 20px; }
+        .log-entry, .client-entry { padding: 10px; border-radius: 6px; margin-bottom: 10px; font-family: "Courier New", Courier, monospace; word-wrap: break-word; }
+        .log-entry.normal { background-color: #e6f7ec; border: 1px solid #b7e4c7; }
+        .log-entry.attack { background-color: #ffeded; border: 1px solid #fcc; color: #c51616; }
+        .log-entry .timestamp { color: #555; font-size: 0.85em; margin-right: 15px; }
+        #client-list { list-style-type: none; padding-left: 0; }
+        .client-entry { background-color: #f8f9fa; border: 1px solid #dee2e6; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>Network IDS Dashboard</h1>
+        
+        <div class="controls">
+            <select id="interfaceSelector" disabled><option>Loading...</option></select>
+            <button id="startButton" class="btn" disabled>Start Monitoring</button>
+            <button id="stopButton" class="btn" disabled>Stop Monitoring</button>
+        </div>
+
+        <div class="status">
+            <strong>Status:</strong> <span id="statusText">Initializing...</span><br>
+            <strong>Packets Processed:</strong> <span id="packetCount">0</span>
+        </div>
+
+        <div id="hotspot-clients-container">
+            <h2>Connected Devices</h2>
+            <ul id="client-list">
+                <li>Listening for devices...</li>
+            </ul>
+        </div>
+
+        <div id="log-container">
+            <h2>Live Alerts</h2>
+            <div id="logs"></div>
+        </div>
+    </div>
+
+    <script src="https://cdn.socket.io/4.7.5/socket.io.min.js"></script>
+    <script>
+        document.addEventListener('DOMContentLoaded', function() {
+            const socket = io();
+
+            const interfaceSelector = document.getElementById('interfaceSelector');
+            const startButton = document.getElementById('startButton');
+            const stopButton = document.getElementById('stopButton');
+            const statusText = document.getElementById('statusText');
+            const packetCount = document.getElementById('packetCount');
+            const clientList = document.getElementById('client-list');
+            const logs = document.getElementById('logs');
+
+            // --- Initial State ---
+            stopButton.disabled = true;
+
+            // --- Socket Event Handlers ---
+            socket.on('connect', () => {
+                console.log('Connected to server.');
+                statusText.textContent = 'Connected. Fetching interfaces...';
+                socket.emit('get_interfaces');
+            });
+
+            socket.on('disconnect', () => {
+                statusText.textContent = 'Disconnected from server.';
+                interfaceSelector.disabled = true;
+                startButton.disabled = true;
+                stopButton.disabled = true;
+            });
+
+            socket.on('interfaces_list', (interfaces) => {
+                console.log('Received interfaces:', interfaces);
+                interfaceSelector.innerHTML = '';
+                if (interfaces.length === 0) {
+                    const option = document.createElement('option');
+                    option.textContent = 'No interfaces found';
+                    interfaceSelector.appendChild(option);
+                    return;
+                }
+                
+                interfaces.forEach(iface => {
+                    const option = document.createElement('option');
+                    option.value = iface.name;
+                    option.textContent = `${iface.description} (${iface.name})`;
+                    interfaceSelector.appendChild(option);
+                });
+                interfaceSelector.disabled = false;
+                startButton.disabled = false;
+                statusText.textContent = 'Interfaces loaded. Ready to start.';
+            });
+
+            socket.on('status_update', (data) => {
+                console.log('Status Update:', data.msg);
+                statusText.textContent = data.msg;
+                if (data.status === 'running') {
+                    startButton.disabled = true;
+                    stopButton.disabled = false;
+                    interfaceSelector.disabled = true;
+                } else {
+                    startButton.disabled = false;
+                    stopButton.disabled = true;
+                    interfaceSelector.disabled = false;
+                    if (data.status === 'stopped') {
+                        packetCount.textContent = '0';
+                    }
+                }
+            });
+
+            socket.on('packet_count_update', (data) => {
+                packetCount.textContent = data.count;
+            });
+
+            socket.on('hotspot_clients', (clients) => {
+                clientList.innerHTML = ''; // Clear current list
+                if (clients.length === 0) {
+                    const li = document.createElement('li');
+                    li.textContent = 'No devices detected or hotspot inactive.';
+                    clientList.appendChild(li);
+                    return;
+                }
+                clients.forEach(client => {
+                    const li = document.createElement('li');
+                    li.classList.add('client-entry');
+                    li.innerHTML = `<strong>IP:</strong> ${client.ip} | <strong>MAC:</strong> ${client.mac} | <strong>Hostname:</strong> ${client.hostname}`;
+                    clientList.appendChild(li);
+                });
+            });
+
+            socket.on('new_alert', (log) => {
+                const logEntry = document.createElement('div');
+                logEntry.classList.add('log-entry');
+                logEntry.classList.add(log.label.toLowerCase() === 'normal' ? 'normal' : 'attack');
+                
+                const timestamp = new Date().toLocaleTimeString();
+                logEntry.innerHTML = `<span class="timestamp">[${timestamp}]</span> ${log.message}`;
+                
+                if (logs.childNodes.length > 100) {
+                    logs.removeChild(logs.lastChild);
+                }
+                logs.insertBefore(logEntry, logs.firstChild);
+            });
+
+            // --- UI Event Listeners ---
+            startButton.addEventListener('click', () => {
+                const selectedInterface = interfaceSelector.value;
+                if (selectedInterface) {
+                    console.log(`Requesting to start sniffing on ${selectedInterface}`);
+                    socket.emit('start_sniffing', { interface: selectedInterface });
+                }
+            });
+
+            stopButton.addEventListener('click', () => {
+                console.log('Requesting to stop sniffing.');
+                socket.emit('stop_sniffing');
+            });
+        });
+    </script>
+</body>
+</html>
