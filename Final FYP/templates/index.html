@@ -15,6 +15,14 @@
         #stopButton { background-color: #fa3e3e; }
         #startButton:disabled, #stopButton:disabled { background-color: #999; cursor: not-allowed; }
         .status { margin-top: 20px; padding: 10px; border-radius: 6px; background-color: #e7f3ff; border: 1px solid #cce0f5; }
+        .email-config { margin-top: 20px; padding: 15px; border-radius: 6px; background-color: #f8f9fa; border: 1px solid #dee2e6; }
+        .email-config h2 { margin-top: 0; }
+        .email-config-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 15px; }
+        .email-config-grid label { font-weight: bold; }
+        .email-config-grid input { width: 100%; padding: 8px; font-size: 14px; border-radius: 6px; border: 1px solid #ccc; box-sizing: border-box; }
+        #saveEmailConfigButton { background-color: #0d6efd; }
+        #sendTestEmailButton { background-color: #6c757d; }
+        .email-buttons { display: flex; gap: 10px; grid-column: span 2; }
         #log-container, #hotspot-clients-container { margin-top: 20px; }
         .log-entry, .client-entry { padding: 10px; border-radius: 6px; margin-bottom: 10px; font-family: "Courier New", Courier, monospace; word-wrap: break-word; }
         .log-entry.normal { background-color: #e6f7ec; border: 1px solid #b7e4c7; }
@@ -37,6 +45,28 @@
         <div class="status">
             <strong>Status:</strong> <span id="statusText">Initializing...</span><br>
             <strong>Packets Processed:</strong> <span id="packetCount">0</span>
+        </div>
+
+        <div class="email-config">
+            <h2>Email Alert Configuration</h2>
+            <div class="email-config-grid">
+                <div>
+                    <label for="senderEmail">Sender's Email (Gmail)</label>
+                    <input type="email" id="senderEmail" placeholder="your_email@gmail.com">
+                </div>
+                <div>
+                    <label for="senderPassword">Gmail App Password</label>
+                    <input type="password" id="senderPassword" placeholder="Enter new password to update">
+                </div>
+                <div>
+                    <label for="recipientEmail">Recipient's Email</label>
+                    <input type="email" id="recipientEmail" placeholder="alert_recipient@example.com">
+                </div>
+                <div class="email-buttons">
+                    <button id="saveEmailConfigButton" class="btn">Save Configuration</button>
+                    <button id="sendTestEmailButton" class="btn">Send Test Email</button>
+                </div>
+            </div>
         </div>
 
         <div id="hotspot-clients-container">
@@ -62,112 +92,172 @@
             const stopButton = document.getElementById('stopButton');
             const statusText = document.getElementById('statusText');
             const packetCount = document.getElementById('packetCount');
-            const clientList = document.getElementById('client-list');
-            const logs = document.getElementById('logs');
-
-            // --- Initial State ---
-            stopButton.disabled = true;
-
-            // --- Socket Event Handlers ---
-            socket.on('connect', () => {
-                console.log('Connected to server.');
-                statusText.textContent = 'Connected. Fetching interfaces...';
-                socket.emit('get_interfaces');
-            });
-
-            socket.on('disconnect', () => {
-                statusText.textContent = 'Disconnected from server.';
-                interfaceSelector.disabled = true;
-                startButton.disabled = true;
-                stopButton.disabled = true;
-            });
-
-            socket.on('interfaces_list', (interfaces) => {
-                console.log('Received interfaces:', interfaces);
-                interfaceSelector.innerHTML = '';
-                if (interfaces.length === 0) {
-                    const option = document.createElement('option');
-                    option.textContent = 'No interfaces found';
-                    interfaceSelector.appendChild(option);
-                    return;
-                }
-                
-                interfaces.forEach(iface => {
-                    const option = document.createElement('option');
-                    option.value = iface.name;
-                    option.textContent = `${iface.description} (${iface.name})`;
-                    interfaceSelector.appendChild(option);
-                });
-                interfaceSelector.disabled = false;
-                startButton.disabled = false;
-                statusText.textContent = 'Interfaces loaded. Ready to start.';
-            });
-
-            socket.on('status_update', (data) => {
-                console.log('Status Update:', data.msg);
-                statusText.textContent = data.msg;
-                if (data.status === 'running') {
-                    startButton.disabled = true;
-                    stopButton.disabled = false;
-                    interfaceSelector.disabled = true;
-                } else {
-                    startButton.disabled = false;
-                    stopButton.disabled = true;
-                    interfaceSelector.disabled = false;
-                    if (data.status === 'stopped') {
-                        packetCount.textContent = '0';
-                    }
-                }
-            });
-
-            socket.on('packet_count_update', (data) => {
-                packetCount.textContent = data.count;
-            });
-
-            socket.on('hotspot_clients', (clients) => {
-                clientList.innerHTML = ''; // Clear current list
-                if (clients.length === 0) {
-                    const li = document.createElement('li');
-                    li.textContent = 'No devices detected or hotspot inactive.';
-                    clientList.appendChild(li);
-                    return;
-                }
-                clients.forEach(client => {
-                    const li = document.createElement('li');
-                    li.classList.add('client-entry');
-                    li.innerHTML = `<strong>IP:</strong> ${client.ip} | <strong>MAC:</strong> ${client.mac} | <strong>Hostname:</strong> ${client.hostname}`;
-                    clientList.appendChild(li);
-                });
-            });
-
-            socket.on('new_alert', (log) => {
-                const logEntry = document.createElement('div');
-                logEntry.classList.add('log-entry');
-                logEntry.classList.add(log.label.toLowerCase() === 'normal' ? 'normal' : 'attack');
-                
-                const timestamp = new Date().toLocaleTimeString();
-                logEntry.innerHTML = `<span class="timestamp">[${timestamp}]</span> ${log.message}`;
-                
-                if (logs.childNodes.length > 100) {
-                    logs.removeChild(logs.lastChild);
-                }
-                logs.insertBefore(logEntry, logs.firstChild);
-            });
-
-            // --- UI Event Listeners ---
-            startButton.addEventListener('click', () => {
-                const selectedInterface = interfaceSelector.value;
-                if (selectedInterface) {
-                    console.log(`Requesting to start sniffing on ${selectedInterface}`);
-                    socket.emit('start_sniffing', { interface: selectedInterface });
-                }
-            });
-
-            stopButton.addEventListener('click', () => {
-                console.log('Requesting to stop sniffing.');
-                socket.emit('stop_sniffing');
-            });
-        });
+                        const clientList = document.getElementById('client-list');
+                        const logs = document.getElementById('logs');
+                        const senderEmail = document.getElementById('senderEmail');
+                        const senderPassword = document.getElementById('senderPassword');
+                        const recipientEmail = document.getElementById('recipientEmail');
+                        const saveEmailConfigButton = document.getElementById('saveEmailConfigButton');
+                        const sendTestEmailButton = document.getElementById('sendTestEmailButton');
+            
+                        // --- Initial State ---
+                        stopButton.disabled = true;
+            
+                        // --- Socket Event Handlers ---
+                        socket.on('connect', () => {
+                            console.log('Connected to server.');
+                            statusText.textContent = 'Connected. Fetching interfaces...';
+                            socket.emit('get_interfaces');
+                            socket.emit('get_email_config'); // Get email config on connect
+                        });
+            
+                        socket.on('disconnect', () => {
+                            statusText.textContent = 'Disconnected from server.';
+                            interfaceSelector.disabled = true;
+                            startButton.disabled = true;
+                            stopButton.disabled = true;
+                        });
+            
+                        socket.on('interfaces_list', (interfaces) => {
+                            console.log('Received interfaces:', interfaces);
+                            interfaceSelector.innerHTML = '';
+                            if (interfaces.length === 0) {
+                                const option = document.createElement('option');
+                                option.textContent = 'No interfaces found';
+                                interfaceSelector.appendChild(option);
+                                return;
+                            }
+                            
+                            interfaces.forEach(iface => {
+                                const option = document.createElement('option');
+                                option.value = iface.name;
+                                option.textContent = `${iface.description} (${iface.name})`;
+                                interfaceSelector.appendChild(option);
+                            });
+                            interfaceSelector.disabled = false;
+                            startButton.disabled = false;
+                            statusText.textContent = 'Interfaces loaded. Ready to start.';
+                        });
+            
+                        socket.on('status_update', (data) => {
+                            console.log('Status Update:', data.msg);
+                            statusText.textContent = data.msg;
+                            if (data.status === 'running') {
+                                startButton.disabled = true;
+                                stopButton.disabled = false;
+                                interfaceSelector.disabled = true;
+                            } else {
+                                startButton.disabled = false;
+                                stopButton.disabled = true;
+                                interfaceSelector.disabled = false;
+                                if (data.status === 'stopped') {
+                                    packetCount.textContent = '0';
+                                }
+                            }
+                        });
+            
+                        socket.on('packet_count_update', (data) => {
+                            packetCount.textContent = data.count;
+                        });
+            
+                        socket.on('hotspot_clients', (clients) => {
+                            clientList.innerHTML = ''; // Clear current list
+                            if (clients.length === 0) {
+                                const li = document.createElement('li');
+                                li.textContent = 'No devices detected or hotspot inactive.';
+                                clientList.appendChild(li);
+                                return;
+                            }
+                            clients.forEach(client => {
+                                const li = document.createElement('li');
+                                li.classList.add('client-entry');
+                                li.innerHTML = `<strong>IP:</strong> ${client.ip} | <strong>MAC:</strong> ${client.mac} | <strong>Hostname:</strong> ${client.hostname}`;
+                                clientList.appendChild(li);
+                            });
+                        });
+            
+                        socket.on('new_alert', (log) => {
+                            const logEntry = document.createElement('div');
+                            logEntry.classList.add('log-entry');
+                            logEntry.classList.add(log.label.toLowerCase() === 'normal' ? 'normal' : 'attack');
+                            
+                            const timestamp = new Date().toLocaleTimeString();
+                            logEntry.innerHTML = `<span class="timestamp">[${timestamp}]</span> ${log.message}`;
+                            
+                            if (logs.childNodes.length > 100) {
+                                logs.removeChild(logs.lastChild);
+                            }
+                            logs.insertBefore(logEntry, logs.firstChild);
+                        });
+            
+                        socket.on('email_config_update', (config) => {
+                            console.log('Received email config:', config);
+                            senderEmail.value = config.sender_email || '';
+                            recipientEmail.value = config.recipient_email || '';
+                            if (config.password) {
+                                senderPassword.placeholder = "Password is set. Enter new password to change.";
+                            } else {
+                                senderPassword.placeholder = "Enter new password to update";
+                            }
+                        });
+            
+                                    // --- UI Event Listeners ---
+            
+                                    startButton.addEventListener('click', () => {
+            
+                                        const selectedInterface = interfaceSelector.value;
+            
+                                        if (selectedInterface) {
+            
+                                            console.log(`Requesting to start sniffing on ${selectedInterface}`);
+            
+                                            socket.emit('start_sniffing', { interface: selectedInterface });
+            
+                                        }
+            
+                                    });
+            
+                        
+            
+                                    stopButton.addEventListener('click', () => {
+            
+                                        console.log('Requesting to stop sniffing.');
+            
+                                        socket.emit('stop_sniffing');
+            
+                                    });
+            
+                        
+            
+                                    saveEmailConfigButton.addEventListener('click', () => {
+            
+                                        const config = {
+            
+                                            sender_email: senderEmail.value,
+            
+                                            password: senderPassword.value,
+            
+                                            recipient_email: recipientEmail.value
+            
+                                        };
+            
+                                        console.log('Sending email config to server:', config);
+            
+                                        socket.emit('update_email_config', config);
+            
+                                        senderPassword.value = ''; // Clear password field for security
+            
+                                    });
+            
+                        
+            
+                                    sendTestEmailButton.addEventListener('click', () => {
+            
+                                        console.log('Requesting to send a test email.');
+            
+                                        socket.emit('send_test_email');
+            
+                                    });        });
     </script>
 </body>
 </html>
