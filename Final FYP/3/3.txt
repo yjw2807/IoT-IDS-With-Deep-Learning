@@ -1,0 +1,127 @@
+# --- Install required libraries ---
+# !pip install scikit-learn imbalanced-learn seaborn joblib --quiet
+
+import pandas as pd
+import numpy as np
+import matplotlib.pyplot as plt
+import seaborn as sns
+import joblib  # For saving models/scalers
+
+from sklearn.model_selection import train_test_split
+from sklearn.preprocessing import StandardScaler, LabelEncoder
+from imblearn.over_sampling import SMOTE
+from sklearn.ensemble import RandomForestClassifier
+from sklearn.metrics import (confusion_matrix, accuracy_score, classification_report)
+
+# === STEP 1: Load data ===
+# Ensure this path matches your environment
+df = pd.read_csv('/content/TONIOT.csv')
+
+# === STEP 2: Remove identifier columns ===
+# We drop 'label' here too because 'label' (0/1) gives away the answer to 'type'.
+drop_cols = ['ts', 'src_ip', 'dst_ip', 'weird_notice', 'weird_add', 'weirdname', 'label']
+df = df.drop(columns=[c for c in drop_cols if c in df.columns], errors='ignore')
+
+# === STEP 3: Handle Categorical Features & Save Encoders ===
+# We need a dictionary to store encoders for the real-time script later
+feature_encoders = {}
+
+for col in df.columns:
+    # Skip the target column 'type' for now, handle it separately
+    if col == 'type':
+        continue
+
+    if df[col].dtype == "object":
+        # Check for high cardinality (too many unique strings)
+        num_unique = df[col].nunique()
+        if num_unique > min(50, len(df)//10):
+            print(f"Column '{col}' has {num_unique} unique strings — dropping.")
+            df = df.drop(columns=[col])
+            continue
+
+        # Create, Fit, Apply, and SAVE the encoder
+        le = LabelEncoder()
+        df[col] = le.fit_transform(df[col].astype(str))
+        feature_encoders[col] = le
+
+# === STEP 4: Drop non-numeric columns (sanity check) ===
+for col in df.columns:
+    if col != 'type' and not np.issubdtype(df[col].dtype, np.number):
+        print(f"Column '{col}' is still not numeric — dropping.")
+        df = df.drop(columns=[col])
+
+# === STEP 5: Impute missing values ===
+for col in df.columns:
+    if col != 'type':
+        df[col] = pd.to_numeric(df[col], errors='coerce')
+        df[col] = df[col].fillna(df[col].mean())
+
+# === STEP 6: Features and Target ===
+X = df.drop(['type'], axis=1)
+y = df['type']
+
+# Encode the Target (The Attack Types)
+le_target = LabelEncoder()
+y = le_target.fit_transform(y.astype(str))
+
+# === STEP 7: Train-test split ===
+X_train, X_test, y_train, y_test = train_test_split(
+    X, y, test_size=0.2, random_state=42, stratify=y
+)
+
+# === STEP 8: SMOTE (Multiclass) ===
+# k_neighbors=1 is safer for very small minority classes often found in ToN-IoT
+smote = SMOTE(random_state=42, k_neighbors=1)
+X_train_bal, y_train_bal = smote.fit_resample(X_train, y_train)
+
+# === STEP 9: Scaling ===
+scaler = StandardScaler()
+X_train_bal = scaler.fit_transform(X_train_bal)
+X_test = scaler.transform(X_test)
+
+# === STEP 10: Random Forest Training ===
+print("Training Random Forest...")
+rf = RandomForestClassifier(n_estimators=100, max_depth=15, random_state=42, n_jobs=-1)
+rf.fit(X_train_bal, y_train_bal)
+
+# === STEP 11: Evaluation ===
+y_pred = rf.predict(X_test)
+
+# Get the actual names of the attacks for the report
+target_names = [str(cls) for cls in le_target.classes_]
+
+print("\n=== Classification Report ===")
+print(classification_report(y_test, y_pred, target_names=target_names))
+
+print(f"Accuracy: {accuracy_score(y_test, y_pred):.4f}")
+
+# === Confusion Matrix Plot ===
+cm = confusion_matrix(y_test, y_pred)
+plt.figure(figsize=(10,8))
+sns.heatmap(cm, annot=True, fmt='d', cmap='Blues', xticklabels=target_names, yticklabels=target_names)
+plt.xlabel('Predicted Intrusion Type')
+plt.ylabel('True Intrusion Type')
+plt.title('Multiclass Confusion Matrix')
+plt.show()
+
+# === STEP 12: SAVE EVERYTHING FOR SCAPY ===
+# This is the most critical step for your request
+print("Saving artifacts for real-time analysis...")
+
+# 1. Save the trained model
+joblib.dump(rf, 'toniot_multiclass_model.pkl')
+
+# 2. Save the scaler (math for normalizing inputs)
+joblib.dump(scaler, 'scaler.pkl')
+
+# 3. Save feature encoders (to convert 'tcp' -> 1)
+joblib.dump(feature_encoders, 'feature_encoders.pkl')
+
+# 4. Save target encoder (to convert prediction 0 -> 'backdoor')
+joblib.dump(le_target, 'target_encoder.pkl')
+
+# 5. Save feature names list (to ensure Scapy inputs data in correct order)
+feature_names = list(X.columns)
+joblib.dump(feature_names, 'feature_names.pkl')
+
+print("Done! All .pkl files are ready for the Scapy script.")
