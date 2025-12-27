@@ -1,4 +1,4 @@
-2.py is a Deep Learning on ToN IoT Data Set
+3 is a Deep Learning on ToN IoT Data Set
 
 Run with hotspot.sh to start the hotspot on Linux System
 
