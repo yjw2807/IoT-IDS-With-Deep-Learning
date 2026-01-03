@@ -310,6 +310,16 @@ def update_email(data):
     if data.get('password') and '***' not in data['password']:
         EMAIL_CONFIG['password'] = data['password']
     socketio.emit('status_update', {'msg': 'Email saved.', 'status': 'stopped'})
+    
+@socketio.on('send_test_email')
+def send_test_email():
+    """Sends a test email using the current configuration."""
+    print("[*] Received request to send a test email.")
+    socketio.emit('status_update', {'msg': 'Sending test email...', 'status': 'running'})
+    subject = "IDS Test Email"
+    body = "This is a test email from the Network IDS system. If you received this, your email configuration is working correctly."
+    send_email_alert(subject, body)
+    socketio.emit('status_update', {'msg': 'Test email sent! Check the recipient inbox.', 'status': 'stopped'})
 
 # ================= MAIN =================
 def load_ml():
