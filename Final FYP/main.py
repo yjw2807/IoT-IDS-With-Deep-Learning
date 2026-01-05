@@ -206,7 +206,7 @@ def predict_and_alert(flow_dict):
         # This fixes "Where is the detailed log?"
         if confidence > 0.4:
             ts = datetime.now().strftime("%H:%M:%S")
-            print(f"[{ts}] [FLOW] {src_ip} -> {dst_ip} | {pred_label} ({confidence:.2f})")
+        #    print(f"[{ts}] [FLOW] {src_ip} -> {dst_ip} | {pred_label} ({confidence:.2f})")
 
         # --- 2. UI ALERTING (Victim Protection Only) ---
         should_alert_ui = False
