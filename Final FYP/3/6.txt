@@ -1,0 +1,169 @@
+import pandas as pd
+import numpy as np
+import joblib
+import matplotlib.pyplot as plt
+import seaborn as sns
+
+# Sklearn Imports (MLP is the Neural Network here)
+from sklearn.model_selection import train_test_split
+from sklearn.preprocessing import StandardScaler, LabelEncoder
+from sklearn.neural_network import MLPClassifier
+from sklearn.metrics import classification_report, confusion_matrix
+from imblearn.over_sampling import SMOTE
+
+# 1. LOAD DATA
+print("Loading ToN-IoT Dataset...")
+# Make sure this path is correct for your environment
+df = pd.read_csv('/content/TONIOT.csv')
+
+# 2. RENAME COLUMNS TO MATCH ZEEK
+zeek_mapping = {
+    'src_ip': 'id.orig_h',
+    'src_port': 'id.orig_p',
+    'dst_ip': 'id.resp_h',
+    'dst_port': 'id.resp_p',
+    'proto': 'proto',
+    'service': 'service',
+    'duration': 'duration',
+    'src_bytes': 'orig_bytes',
+    'dst_bytes': 'resp_bytes',
+    'conn_state': 'conn_state',
+    'src_pkts': 'orig_pkts',
+    'dst_pkts': 'resp_pkts'
+}
+df = df.rename(columns=zeek_mapping)
+
+# 3. FEATURE SELECTION
+features = [
+    'id.orig_p', 'id.resp_p', 'proto', 'service',
+    'duration', 'orig_bytes', 'resp_bytes', 'conn_state',
+    'orig_pkts', 'resp_pkts',
+    'type' # Target
+]
+df = df[[c for c in features if c in df.columns]]
+
+# 4. CLEANING
+df = df.fillna(0)
+df['service'] = df['service'].replace(0, '-')
+
+# 5. ENCODING
+feature_encoders = {}
+categorical_cols = ['proto', 'service', 'conn_state']
+
+print("Encoding categorical features...")
+for col in categorical_cols:
+    if col in df.columns:
+        df[col] = df[col].astype(str)
+        le = LabelEncoder()
+        df[col] = le.fit_transform(df[col])
+        feature_encoders[col] = le
+
+# 6. SPLIT & BALANCE
+X = df.drop('type', axis=1)
+y = df['type']
+
+le_target = LabelEncoder()
+y = le_target.fit_transform(y.astype(str))
+
+# Stratify split
+X_train, X_test, y_train, y_test = train_test_split(
+    X, y, test_size=0.2, random_state=42, stratify=y
+)
+
+print("Balancing with SMOTE...")
+smote = SMOTE(random_state=42, k_neighbors=1)
+X_train_bal, y_train_bal = smote.fit_resample(X_train, y_train)
+
+# 7. SCALE
+scaler = StandardScaler()
+X_train_bal = scaler.fit_transform(X_train_bal)
+X_test = scaler.transform(X_test)
+
+# --- TRAINING SECTION (MLPClassifier) ---
+
+print("Training Scikit-Learn Neural Network (MLP)...")
+
+# We use the same architecture: (64, 32) means 2 hidden layers
+# max_iter=150 mimics your 148 epochs
+model = MLPClassifier(
+    hidden_layer_sizes=(64, 32),
+    activation='relu',
+    solver='adam',
+    batch_size=64,
+    max_iter=100,
+    early_stopping=True,  # Stops if validation score doesn't improve
+    validation_fraction=0.1,
+    random_state=42,
+    verbose=True
+)
+
+model.fit(X_train_bal, y_train_bal)
+
+# 8. EVALUATE
+print("Evaluating Model...")
+y_pred = model.predict(X_test)
+
+# Print Report
+print(classification_report(y_test, y_pred, target_names=[str(c) for c in le_target.classes_]))
+
+# --- PLOTTING ---
+
+# Standard Confusion Matrix
+cm = confusion_matrix(y_test, y_pred)
+cm_df = pd.DataFrame(
+    cm,
+    index=le_target.classes_,
+    columns=le_target.classes_
+)
+
+print("Confusion Matrix:")
+print(cm_df)
+
+plt.figure(figsize=(10, 8))
+sns.heatmap(cm_df, annot=True, fmt='d', cmap='Blues')
+plt.title("Confusion Matrix – ToN-IoT (MLP)")
+plt.ylabel("Actual Label")
+plt.xlabel("Predicted Label")
+plt.tight_layout()
+plt.show()
+
+# Normalized Confusion Matrix (Recall)
+cm_norm = confusion_matrix(y_test, y_pred, normalize='true')
+cm_norm_df = pd.DataFrame(
+    cm_norm,
+    index=le_target.classes_,
+    columns=le_target.classes_
+)
+
+plt.figure(figsize=(10, 8))
+sns.heatmap(cm_norm_df, annot=True, fmt='.2f', cmap='Blues')
+plt.title("Normalized Confusion Matrix (Recall per Class)")
+plt.ylabel("Actual Label")
+plt.xlabel("Predicted Label")
+plt.tight_layout()
+plt.show()
+
+# 9. SAVE ARTIFACTS (This creates the .PKL file you need)
+print("Saving artifacts...")
+
+# 1. The Model (as .pkl)
+joblib.dump(model, 'toniot_multiclass_model.pkl')
+
+# 2. The Scaler
+joblib.dump(scaler, 'scaler.pkl')
+
+# 3. The Feature Encoders
+joblib.dump(feature_encoders, 'feature_encoders.pkl')
+
+# 4. The Target Encoder
+joblib.dump(le_target, 'target_encoder.pkl')
+
+# 5. The Feature Names List
+joblib.dump(list(X.columns), 'feature_names.pkl')
+
+print("Done! All files generated successfully:")
+print("- toniot_multiclass_model.pkl")
+print("- scaler.pkl")
+print("- feature_encoders.pkl")
+print("- target_encoder.pkl")
+print("- feature_names.pkl")
