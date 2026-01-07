@@ -245,7 +245,7 @@ def is_protected(ip):
 
 def is_private_ip(ip):
     try:
-        return ip_address(ip).is_private
+        return ip_address(ip) in PROTECTED_SUBNET
     except ValueError:
         return False
 
