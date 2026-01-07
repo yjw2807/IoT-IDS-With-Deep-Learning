@@ -48,7 +48,7 @@ df['service'] = df['service'].replace(0, '-')
 
 # 5. ENCODING
 feature_encoders = {}
-categorical_cols = ['proto', 'service', 'conn_state']
+categorical_cols = ['proto', 'service','id.resp_p','id.orig_p','conn_state']
 
 print("Encoding categorical features...")
 for col in categorical_cols:
